@@ -1,9 +1,10 @@
 <?php
 
 $schemas = ['clockwork', 'clockwork2'];
-$query = "SELECT * FROM invoices";
+$query = "select * from `invoices` where `id` IN (?, ?, ?, ?, ?, ?)";
+$bindings = array(1, 10, 14, 15, 16, 17);
 
-$test = helloWorld($schemas, $query);
+print_r(runSelectCpp($schemas, $query, $bindings));
 
 
 

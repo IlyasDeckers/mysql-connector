@@ -7,91 +7,127 @@
 #include <thread>
 #include <future>
 #include <vector>
-#include "mysql_connection.h"
-#include <mysql_driver.h>
+#include <typeinfo>
+#include <any>
 #include <cppconn/driver.h>
 #include <cppconn/exception.h>
 #include <cppconn/resultset.h>
 #include <cppconn/statement.h>
+#include <cppconn/prepared_statement.h>
 
 using namespace std;
 
-Php::Value fetchDataFromDB(string schema, string query)
+bool isNumber(string s)
+{
+    for (unsigned int i = 0; i < s.length(); i++)
+        if (isdigit(s[i]) == false)
+            return false;
+
+    return true;
+}
+
+int getKey(Php::Value array)
+{
+    return array.size();
+}
+
+Php::Value fetchDataFromDB(string schema, string query, vector<Php::Value> bindings)
 {
     sql::Driver *driver;
     sql::Connection *con;
-    sql::Statement *stmt;
     sql::ResultSet *res;
+    sql::PreparedStatement  *prep_stmt;
+    sql::ResultSetMetaData *res_meta;
 
     /* Create a connection */
     driver = get_driver_instance();
     con = driver->connect("tcp://127.0.0.1:3306", "root", "A0WK51YS");
-
-    /* Connect to the MySQL so_test database */
     con->setSchema(schema);
-    stmt = con->createStatement();
 
-    // Select all columns/rows from example_table
-    res = stmt->executeQuery(query);
+    prep_stmt = con->prepareStatement(query);
 
-    //get result set metadata
-    sql::ResultSetMetaData *res_meta = res->getMetaData();
+    int i = 1;
+    for (auto &binding : bindings) {
+        if (isNumber(binding)) {
+            prep_stmt->setInt(i++, binding);
+        } else {
+            string val = binding;
+            prep_stmt->setString(i++, val);
+        }
+    }
+
+    res = prep_stmt->executeQuery();
+    delete prep_stmt;
+
+    res_meta = res->getMetaData();
     int columns = res_meta->getColumnCount();
 
     //Loop for each row
     int key = 0;
     Php::Value array;
     while (res->next()) {
-        array[key] = {};
+        Php::Object object;
         for (int i = 1; i <= columns; i++) {
-
             string column = res_meta->getColumnName(i);
             string columnTypeName = res_meta->getColumnTypeName(i);
 
             if (columnTypeName == "INT UNSIGNED" || columnTypeName == "TINYINT") {
                 int integer = res->getInt(i);
-                array[key][column] = integer;
+                object[column] = integer;
             }
 
             if (columnTypeName != "INT UNSIGNED" && columnTypeName != "TINYINT") {
                 string value = res->getString(i);
-                array[key][column] = value;
+                object[column] = value;
             }
         }
-        array[key]["meta"]["schema"] = schema;
-        key++;
+        object["schema"] = schema;
+
+        array[key++] = object;
     }
 
     delete res;
-    delete stmt;
     delete con;
 
     return array;
 }
 
 /**
- *  Example function that shows how to generate output
+ *
+ * @param params
+ * @return Php::Value array
  */
 Php::Value exec(Php::Parameters &params)
 {
-    std::vector<string> schemas = params[0];
+    vector<string> schemas = params[0];
+    vector<Php::Value> bindings = params[2];
     string query = params[1];
+
+    std::vector<std::future<Php::Value>> futures;
 
     Php::Value array;
     for (size_t i = 0; i < schemas.size(); i++)
     {
-        int key = sizeof(array) / sizeof(array[0]);
-        if (key == 1) {
-            key = 0;
-        }
+        //futures.push_back (std::async(fetchDataFromDB, schemas[i], query, bindings));
+        Php::Value data = fetchDataFromDB(schemas[i], query, bindings);
 
-        Php::Value data = fetchDataFromDB(schemas[i], query);
+        // Append the results to the existing array.
+        int key = getKey(array);
         for (auto &items: data)
         {
-            array[key] = items.second;
-            key++;
+            array[key++] = items.second;
         }
     }
+
+//    for(auto &e : futures) {
+//        Php::Value data = e.get();
+//
+//        int key = getKey(array);
+//        for (auto &items: data)
+//        {
+//            array[key++] = items.second;
+//        }
+//    }
 
     return array;
 }
@@ -110,16 +146,14 @@ extern "C"
      */
     PHPCPP_EXPORT void *get_module()
     {
-        // static(!) Php::Extension object that should stay in memory
-        // for the entire duration of the process (that's why it's static)
         static Php::Extension extension("query_executor", "1.0");
 
-        extension.add<exec>("helloWorld", {
+        extension.add<exec>("runSelectCpp", {
                 Php::ByVal("schemas", Php::Type::Array),
-                Php::ByVal("query", Php::Type::String)
+                Php::ByVal("query", Php::Type::String),
+                Php::ByVal("bindings", Php::Type::Array)
         });
 
-            // return the extension
         return extension;
     }
 };
