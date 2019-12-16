@@ -108,26 +108,26 @@ Php::Value exec(Php::Parameters &params)
     Php::Value array;
     for (size_t i = 0; i < schemas.size(); i++)
     {
-        //futures.push_back (std::async(fetchDataFromDB, schemas[i], query, bindings));
-        Php::Value data = fetchDataFromDB(schemas[i], query, bindings);
+        futures.push_back (std::async(fetchDataFromDB, schemas[i], query, bindings));
+//        Php::Value data = fetchDataFromDB(schemas[i], query, bindings);
+//
+//        // Append the results to the existing array.
+//        int key = getKey(array);
+//        for (auto &items: data)
+//        {
+//            array[key++] = items.second;
+//        }
+    }
 
-        // Append the results to the existing array.
+    for(auto &e : futures) {
+        Php::Value data = e.get();
+
         int key = getKey(array);
         for (auto &items: data)
         {
             array[key++] = items.second;
         }
     }
-
-//    for(auto &e : futures) {
-//        Php::Value data = e.get();
-//
-//        int key = getKey(array);
-//        for (auto &items: data)
-//        {
-//            array[key++] = items.second;
-//        }
-//    }
 
     return array;
 }
